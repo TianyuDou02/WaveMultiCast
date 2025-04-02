@@ -99,9 +99,9 @@ def vis_res(pred_seq, gt_seq, save_path, data_type='vil',
 
 DATAPATH = {
     'cikm' : 'path/to/dataset/cikm.h5',
-    'shanghai' : '/media/root1/B3D12CBDE981113E/dty/DiffCast-main/datasets/data/shanghai.h5',
+    'shanghai' : 'path/to/shanghai.h5',
     'meteo' : 'path/to/dataset/meteo_radar.h5',
-    'sevir' : '/media/root1/B3D12CBDE981113E/dty/DiffCast-main/datasets/data/sevir'
+    'sevir' : 'path/to/sevir'
 }
 
 def get_dataset(data_name, img_size, seq_len, **kwargs):
@@ -130,9 +130,9 @@ def get_dataset(data_name, img_size, seq_len, **kwargs):
     elif dataset_name == 'sevir':
         from .dataset_sevir import SEVIRTorchDataset, gray2color, PIXEL_SCALE, THRESHOLDS
         
-        train_valid_split = (2017, 8, 31)
-        valid_test_split = (2017, 10, 31)
-        test_last_split = (2017, 12, 31)
+        train_valid_split = (2017, 6, 30)
+        valid_test_split = (2017, 8, 31)
+        test_last_split = (2017, 10, 31)
         batch_size = kwargs.get('batch_size', 1)
         
         train = SEVIRTorchDataset(
