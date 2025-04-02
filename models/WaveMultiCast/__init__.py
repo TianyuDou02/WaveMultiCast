@@ -1,0 +1,1 @@
+from .wave_multi_cast import get_model
