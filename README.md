@@ -1,5 +1,5 @@
 # WaveMultiCast
-Official implementation of "[WaveMultiCast: Precipitation Nowcasting with Wavelet Transform and Multi-Branch Core Layey]"
+Official implementation of "[WaveMultiCast: Precipitation Nowcasting with Wavelet Transform and Multi-Branch Core Layeyr"
 
 ## Code
 
@@ -20,7 +20,7 @@ conda activate wavemulticast
 </details>
 
 ### Datasets
-All the four datasets in our paper is publicly available.
+All the two datasets in our paper is publicly available.
 You can find the datasets as follows:
 - [SEVIR](https://nbviewer.org/github/MIT-AI-Accelerator/eie-sevir/blob/master/examples/SEVIR_Tutorial.ipynb)
 - [Shanghai_Radar](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/2GKMQJ)
