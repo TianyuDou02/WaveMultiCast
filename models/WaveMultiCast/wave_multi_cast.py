@@ -3,59 +3,14 @@ import torch.nn as nn
 from timm.models.layers import DropPath, trunc_normal_
 import torch.nn.functional as F
 from omegaconf import OmegaConf
-from .mamba import VSSBlock
+from mamba import VSSBlock
 
-from .midlayer import ChannelAttention
+from midlayer import ChannelAttention
 from pytorch_wavelets import DWTForward
-class BasicConv2d(nn.Module):
-
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 kernel_size=3,
-                 stride=1,
-                 padding=0,
-                 dilation=1,
-                 upsampling=False,
-                 act_norm=True,
-                 act_inplace=False):
-        super(BasicConv2d, self).__init__()
-        self.act_norm = act_norm
-        if upsampling is True:
-            self.conv = nn.Sequential(*[
-                nn.Conv2d(in_channels, out_channels*4, kernel_size=kernel_size,
-                          stride=1, padding=padding, dilation=dilation),
-                nn.PixelShuffle(2)
-            ])
-        else:
-            self.conv = nn.Conv2d(
-                in_channels, out_channels, kernel_size=kernel_size,
-                stride=stride, padding=padding, dilation=dilation)
-        if self.act_norm:
-            self.norm = nn.GroupNorm(2, out_channels)
-            self.act = nn.SiLU(inplace=act_inplace)
-
-        self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, (nn.Conv2d)):
-            # trunc_normal_(m.weight, std=.02)
-            nn.init.constant_(m.bias, 0)
-
-    def forward(self, x):
-        y = self.conv(x)
-        if self.act_norm:
-            y = self.act(self.norm(y))
-        return y
 class Down_wt(nn.Module):
     def __init__(self, in_ch, out_ch):
         super(Down_wt, self).__init__()
         self.wt = DWTForward(J=1, mode='zero', wave='haar')
-        # self.conv_bn_relu = nn.Sequential(
-        #                             nn.Conv2d(in_ch*4, out_ch, kernel_size=1, stride=1),
-        #                             nn.BatchNorm2d(out_ch),   
-        #                             nn.ReLU(inplace=True),                                 
-        #                             ) 
         self.conv = nn.Conv2d(in_ch*4, out_ch, kernel_size=1, stride=1)
     def forward(self, x):
         yL, yH = self.wt(x)
@@ -85,70 +40,48 @@ class WTSC(nn.Module):
             y = self.act(self.norm(y))
         return y
 
-class ConvSC(nn.Module):
-
-    def __init__(self,
-                 C_in,
-                 C_out,
-                 kernel_size=3,
-                 downsampling=False,
-                 upsampling=False,
-                 act_norm=True,
-                 act_inplace=False):
-        super(ConvSC, self).__init__()
-
-        stride = 2 if downsampling is True else 1
-        padding = (kernel_size - stride + 1) // 2
-
-        self.conv = BasicConv2d(C_in, C_out, kernel_size=kernel_size, stride=stride,
-                                upsampling=upsampling, padding=padding,
-                                act_norm=act_norm, act_inplace=act_inplace)
-
+class Up_Wt(nn.Module):
+    def __init__(self, in_ch, out_ch):
+        super(Up_Wt, self).__init__()
+        self.wt = DWTForward(J=1, mode='zero', wave='haar')
+        
+        self.up = nn.Sequential(
+            nn.PixelShuffle(2),
+            nn.ConvTranspose2d(in_ch, out_ch, kernel_size=4, stride=2, padding=1)
+        )
     def forward(self, x):
-        y = self.conv(x)
-        return y
-
-class MambaDU(nn.Module):
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 kernel_size=3,
-                 downsampling=False,
-                 upsampling=False,
-                 act_norm=True,
-                 act_inplace=False,
-                 vss=True
-                 ):
-        super(MambaDU, self).__init__()
-        stride = 2 if downsampling else 1
-        padding = (kernel_size - stride + 1) // 2
-        self.vss = vss
-        self.conv = BasicConv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding, 
-                                upsampling=upsampling, act_norm=act_norm, act_inplace=act_inplace,)
-        if vss:
-            self.VSS = VSSBlock(hidden_dim=out_channels)
-    def forward(self, x):
-        x = self.conv(x)
-        if self.vss:
-            y = x.permute(0,2,3,1).contiguous()
-            y = self.VSS(y)
-            y = y.permute(0,3,1,2).contiguous()
-            return y+x
+        yL, yH = self.wt(x)
+        y_HL = yH[0][:,:,0,::]
+        y_LH = yH[0][:,:,1,::]
+        y_HH = yH[0][:,:,2,::]
+        x = torch.cat([yL, y_HL, y_LH, y_HH], dim=1)
+        x = self.up(x)
         return x
+
+class WTUPSC(nn.Module):
+    def __init__(self,c_in,c_out,act_norm=True,act_inplace=False,
+                 upsampling=False,downsampling=False):
+        super(WTUPSC,self).__init__()
+        self.act_norm = act_norm
+        if upsampling:
+            self.sample = Up_Wt(c_in,c_out)
+        else:
+            self.sample = nn.Conv2d(c_in,c_out,3,1,1)
+            # self.sample = nn.Identity()
+        if self.act_norm:
+            self.norm = nn.GroupNorm(2,c_out)
+            self.act = nn.SiLU(inplace=act_inplace)
+    def forward(self,x):
+        y = self.sample(x)
+        if self.act_norm:
+            y = self.act(self.norm(y))
+        return y
 
 def sampling_generator(N, reverse=False):
     samplings = [False,True] * (N // 2)
     if reverse: return list(reversed(samplings[:N]))
     else: return samplings[:N]
-def picture_generator(N,sampling,picture_size):
-    pictures = []
-    for i in range(N):
-        if sampling[i]:
-            pictures.append(picture_size//2)
-            picture_size = picture_size//2
-        else:
-            pictures.append(picture_size)
-    return pictures
+
 class DWEncoder(nn.Module):
     def __init__(self,C_in,C_hid,N_S,act_inplace=False):
         super(DWEncoder,self).__init__()
@@ -163,46 +96,22 @@ class DWEncoder(nn.Module):
         for i in range(1,len(self.enc)):
             latent = self.enc[i](latent)
         return latent,enc1
-
-class Encoder(nn.Module):
-    """3D Encoder for SimVP"""
-
-    def __init__(self, C_in, C_hid, N_S, spatio_kernel, act_inplace=True):
-        samplings = sampling_generator(N_S)
-        super(Encoder, self).__init__()
-        self.enc = nn.Sequential(
-              ConvSC(C_in, C_hid, spatio_kernel, downsampling=samplings[0],
-                     act_inplace=act_inplace,),
-            *[ConvSC(C_hid, C_hid, spatio_kernel, downsampling=s,
-                     act_inplace=act_inplace) for s in samplings[1:]]
-        )
-
-    def forward(self, x):  # B*4, 3, 128, 128
-        enc1 = self.enc[0](x)
-        latent = enc1
-        for i in range(1, len(self.enc)):
-            latent = self.enc[i](latent)
-        return latent, enc1
-class Decoder(nn.Module):
-    """3D Decoder for SimVP"""
-
-    def __init__(self, C_hid, C_out, N_S, spatio_kernel, act_inplace=True):
-        samplings = sampling_generator(N_S, reverse=True)
-        super(Decoder, self).__init__()
+class DWDecoder(nn.Module):
+    def __init__(self,C_hid,C_out,N_S,act_inplace=False):
+        super(DWDecoder,self).__init__()
+        sampling = sampling_generator(N_S,reverse=True)
         self.dec = nn.Sequential(
-            *[ConvSC(C_hid, C_hid, spatio_kernel, upsampling=s,
-                     act_inplace=act_inplace) for s in samplings[:-1]],
-              ConvSC(C_hid, C_hid, spatio_kernel, upsampling=samplings[-1],
-                     act_inplace=act_inplace,)
+            *[WTUPSC(C_hid, C_hid, upsampling=sampling[i], act_inplace=act_inplace) for i in range(N_S-1)],
+            WTUPSC(C_hid, C_hid, upsampling=sampling[-1], act_inplace=act_inplace, act_norm=False)
         )
-        self.readout = nn.Conv2d(C_hid, C_out, 1)
-
+        self.read_out = nn.Conv2d(C_hid, C_out, 1)
     def forward(self, hid, enc1=None):
-        for i in range(0, len(self.dec)-1):
+        for i in range(len(self.dec)-1):
             hid = self.dec[i](hid)
-        Y = self.dec[-1](hid + enc1)
-        Y = self.readout(Y)
+        Y = self.dec[-1](hid+enc1)
+        Y = self.read_out(Y)
         return Y
+
 
 class ConvBN(torch.nn.Sequential):
     def __init__(self, in_planes, out_planes, kernel_size=1, stride=1, padding=0, dilation=1, groups=1, with_bn=True):
@@ -322,6 +231,7 @@ class MidMambaUnet(nn.Module):
         y = z.reshape(B, T, C, H, W)
         return y
 
+
     
 class WaveMultiCast_Model(nn.Module):
     def __init__(self,in_shape, T_in, T_out,  **kwargs):
@@ -338,7 +248,7 @@ class WaveMultiCast_Model(nn.Module):
 
         # self.enc = Encoder(C_in=C,C_hid=hid_S,N_S=en_de_depth,spatio_kernel=3,act_inplace=False)
         self.enc = DWEncoder(C_in=C,C_hid=hid_S,N_S=en_de_depth,act_inplace=False)
-        self.dec = Decoder(C_hid=hid_S,C_out=C,N_S=en_de_depth,spatio_kernel=3,act_inplace=False)
+        self.dec = DWDecoder(C_hid=hid_S,C_out=C,N_S=en_de_depth,act_inplace=False)
         self.mid = MidMambaUnet(in_channels=T_in*hid_S,hid_channels=hid_T,out_channels=T_in*hid_S,depth=mid_depth)
         self.mid_spatio = MidSpatio(in_channels=hid_S,hid_channels=hid_T,out_channels=hid_S,depth=mid_depth)
 
