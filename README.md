@@ -1,5 +1,5 @@
 # WaveMultiCast
-Official implementation of "[WaveMultiCast: Precipitation Nowcasting with Wavelet Transform and Multi-Branch Core Layer"
+Official implementation of "[WaveMultiCast: Precipitation Nowcasting with Wavelet Transform and Multi-Branch Core Layer]"
 
 ## Code
 
